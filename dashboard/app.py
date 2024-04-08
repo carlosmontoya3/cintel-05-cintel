@@ -1,135 +1,178 @@
-# --------------------------------------------
-# Imports at the top - PyShiny EXPRESS VERSION
-# --------------------------------------------
-
-# From shiny, import just reactive and render
+# Import libraries
 from shiny import reactive, render
-
-# From shiny.express, import just ui
 from shiny.express import ui
-
-# Imports from Python Standard Library to simulate live data
 import random
 from datetime import datetime
-
-# --------------------------------------------
-# Import icons as you like
-# --------------------------------------------
-
+from collections import deque
+import pandas as pd
+import plotly.express as px
+from ipyleaflet import Map
+from shinywidgets import render_plotly, render_widget
+from shinyswatch import theme
 from faicons import icon_svg
 
-# --------------------------------------------
-# FOR LOCAL DEVELOPMENT
-# --------------------------------------------
+# Set a constant UPDATE INTERVAL for all live data
+UPDATE_INTERVAL_SECS: int = 5
 
-# Add all packages not in the Std Library
-# to requirements.txt:
-#
-# faicons
-# shiny
-# shinylive
-# 
-# And install them into an active project virtual environment (usually in .venv)
-# --------------------------------------------
+# Initialize reactive value, wrapper around deque
+DEQUE_SIZE: int = 4
+reactive_value_wrapper = reactive.value(deque(maxlen=DEQUE_SIZE))
 
-
-# --------------------------------------------
-# SET UP THE REACTIVE CONTENT
-# --------------------------------------------
-
-# --------------------------------------------
-# PLANNING: We want to get a fake temperature and 
-# Time stamp every N seconds. 
-# For now, we'll avoid storage and just 
-# Try to get the fake live data working and sketch our app. 
-# We can do all that with one reactive calc.
-# Use constants for update interval so it's easy to modify.
-# ---------------------------------------------------------
-
-# --------------------------------------------
-# First, set a constant UPDATE INTERVAL for all live data
-# Constants are usually defined in uppercase letters
-# Use a type hint to make it clear that it's an integer (: int)
-# --------------------------------------------
-UPDATE_INTERVAL_SECS: int = 1
-# --------------------------------------------
-
-# Initialize a REACTIVE CALC that our display components can call
-# to get the latest data and display it.
-# The calculation is invalidated every UPDATE_INTERVAL_SECS
-# to trigger updates.
-
-# It returns everything needed to display the data.
-# Very easy to expand or modify.
-# (I originally looked at REACTIVE POLL, but this seems to work better.)
-# --------------------------------------------
-
+# Initialize reactive calculation
 @reactive.calc()
 def reactive_calc_combined():
 
     # Invalidate this calculation every UPDATE_INTERVAL_SECS to trigger updates
     reactive.invalidate_later(UPDATE_INTERVAL_SECS)
 
-    # Data generation logic. Get random between -18 and -16 C, rounded to 1 decimal place
-    temp = round(random.uniform(-18, -16), 1)
+    # Data generation logic. Get random temperature between 32 and 40 C, rounded to 1 decimal place (Dallas, TX)
+    temp = round(random.uniform(32, 40), 1)
 
-    # Get a timestamp for "now" and use string format strftime() method to format it
+    # Get a timestamp for "now"
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    latest_dictionary_entry = {"temp": temp, "timestamp": timestamp}
+    new_dictionary_entry = {"temp": temp, "timestamp": timestamp}
 
-    # Return everything we need
-    return latest_dictionary_entry
+    # Get the deque and append the new entry
+    reactive_value_wrapper.get().append(new_dictionary_entry)
 
-# ------------------------------------------------
-# Define the Shiny UI Page layout - Page Options
-# ------------------------------------------------
+    # Get a snapshot of the current deque for any further processing
+    deque_snapshot = reactive_value_wrapper.get()
 
-# Call the ui.page_opts() function
-# Set title to a string in quotes that will appear at the top
-# Set fillable to True to use the whole page width for the UI
+    # For Display: Convert deque to DataFrame for display
+    df = pd.DataFrame(deque_snapshot)
 
-ui.page_opts(title="PyShiny Express: Live Data (Basic)", fillable=True)
+    # For Display: Get the latest dictionary entry
+    latest_dictionary_entry = new_dictionary_entry
 
-# ------------------------------------------------
-# Define the Shiny UI Page layout - Sidebar
-# ------------------------------------------------
+    # Return a tuple everything we need
+    return deque_snapshot, df, latest_dictionary_entry
 
-# Sidebar is typically used for user interaction/information
-# Note the with statement to create the sidebar followed by a colon
-# Everything in the sidebar is indented consistently
+# Define the Shiny UI Page layout, set the title
+ui.page_opts(title="Montoya's Dallas, TX Dashboard", fillable=True)
+theme.slate()
 
-with ui.sidebar(open="open"):
-    ui.h2("Antarctic Explorer", class_="text-center")
+# Define the UI Layout Sidebar with background color
+with ui.sidebar(open="open", style="background-color: silver; color:white"):
+    
+    # Header with two lines
+    with ui.h2(class_="text-center"):
+        ui.div("Dallas, TX Weather"),
+
+    # Add an icon with custom size using CSS
+    ui.div(
+    icon_svg("star"),
+    class_="text-center", 
+    style="color: navy; font-size: 50px",
+    )
+    
+    # Description
     ui.p(
-        "A demonstration of real-time temperature readings in Antarctica.",
+        "Real-time temperature readings in Dallas, TX",
         class_="text-center",
     )
+    ui.hr() # Horizontal line for visual separation
+    
+    # Links section
+    ui.h6("Links:")
+    ui.a(
+        "Carlos' GitHub Source",
+        href="https://github.com/carlosmontoya3/cintel-05-cintel",
+        target="_blank",
+        style="color: #007bff;",  # Blue color for links
+    )
+    ui.a(
+        "PyShiny", 
+        href="https://shiny.posit.co/py/", 
+        target="_blank",
+        style="color: #007bff;",  # Blue color for links
+    )
+    ui.a(
+        "PyShiny Express",
+        href="https://shiny.posit.co/blog/posts/shiny-express/",
+        target="_blank",
+        style="color: #007bff;",  # Blue color for links
+    )
 
-# ------------------------------------------------
-# Define the Shiny UI Page layout - Main Section
-# ------------------------------------------------
+# Display current temperature in the main panel
+with ui.layout_column_wrap(fill=False):
+    # Display icon and title in the main panel
+    with ui.value_box(
+        showcase=icon_svg("sun"),
+        style="background-color: silver; color: navy;",  # Add CSS style here
+    ):
+        "Current Temperature"
 
-# In Shiny Express, everything not in the sidebar is in the main panel
+        @render.text
+        def display_temp():
+            """Get the latest reading and return a temperature string"""
+            deque_snapshot, df, latest_dictionary_entry = reactive_calc_combined()
+            return f"{latest_dictionary_entry['temp']} C"
 
-ui.h2("Current Temperature")
+    # Display current day and time card
+    with ui.card(full_screen=True):
+    # Customize card header with background color, text, and icon
+        ui.card_header(
+        "Current Date & Time",
+        style="background-color: navy; color: white;",
+    )
 
-@render.text
-def display_temp():
-    """Get the latest reading and return a temperature string"""
-    latest_dictionary_entry = reactive_calc_combined()
-    return f"{latest_dictionary_entry['temp']} C"
+        # Customize card content text color and font size
+        @render.text
+        def display_time():
+            """Get the latest reading and return a timestamp string"""
+            deque_snapshot, df, latest_dictionary_entry = reactive_calc_combined()
+            return f"{latest_dictionary_entry['timestamp']}"
 
-ui.p("warmer than usual")
+        # Add icon
+        icon_svg("clock")
 
-icon_svg("snowflake")
+with ui.layout_column_wrap(fill=False):
+    
+    # Display the DataFrame
+    with ui.card(style="width: 100%; height: 200px;"):
+        ui.card_header("Data Table", style="background-color: navy; color: white;")
 
-ui.hr()
+        @render.data_frame
+        def display_df():
+            """Get the latest reading and return a dataframe with current readings"""
+            deque_snapshot, df, latest_dictionary_entry = reactive_calc_combined()
+            pd.set_option('display.width', None)        # Use maximum width
+            return render.DataGrid( df,width="100%")
 
-ui.h2("Current Date and Time")
+    #Display the Dallas map card
+    with ui.card(style="width: 100%; height: 200px;"):
+        ui.card_header("Map of Dallas", style="background-color: navy; color: white;")
+        @render_widget  
+        def map():
+            return Map(center=(32.7767, -96.7970), zoom=10)  
+    
 
-@render.text
-def display_time():
-    """Get the latest reading and return a timestamp string"""
-    latest_dictionary_entry = reactive_calc_combined()
-    return f"{latest_dictionary_entry['timestamp']}"
+# Display the chart with current trend
+with ui.layout_columns(col_widths=[12, 6]):
+    with ui.card(full_screen=True):
+        ui.card_header("Chart with Current Trend", style="background-color: navy; color: white;")
+
+        # Initialize an empty figure
+        fig = px.line(title="Temperature Trend Over Time", labels={"temp": "Temperature (°C)", "timestamp": "Time"})
+
+        @render_plotly
+        def display_plot():
+            # Fetch data from the reactive calc function
+            deque_snapshot, df, latest_dictionary_entry = reactive_calc_combined()
+
+            # Ensure the DataFrame is not empty before updating the plot
+            if not df.empty:
+                # Convert the 'timestamp' column to datetime for better plotting
+                df["timestamp"] = pd.to_datetime(df["timestamp"])
+
+                # Add trace for temperature data
+                fig.add_scatter(x=df["timestamp"], y=df["temp"], mode="lines", name="Temperature")
+
+                # Configure animation settings
+                fig.update_layout(updatemenus=[dict(type="buttons", showactive=False, buttons=[dict(label="Play", method="animate", args=[None, {"fromcurrent": True}]),])])
+
+                # Update layout as needed to customize further
+                fig.update_layout(xaxis_title="Time", yaxis_title="Temperature (°C)")
+
+            return fig
